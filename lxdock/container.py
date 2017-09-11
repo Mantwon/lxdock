@@ -1,3 +1,9 @@
+import asyncio
+import socket
+import fcntl
+import struct
+import sys
+import ast
 import logging
 import os
 import shlex
@@ -6,10 +12,13 @@ import textwrap
 import time
 from functools import wraps
 from pathlib import PurePosixPath
+from prettytable import PrettyTable
 
 from pylxd.exceptions import LXDAPIException, NotFound
+from pyslp.slptool import SLPClient
 
 from . import constants
+from .client import get_client
 from .exceptions import ContainerOperationFailed
 from .guests import Guest
 from .hosts import Host
@@ -20,6 +29,19 @@ from .utils.identifier import folderid
 
 logger = logging.getLogger(__name__)
 
+def get_container_host(lxd_name):
+    loop = asyncio.get_event_loop()
+    slp_client = SLPClient(ip_addrs=['0.0.0.0'])
+    url_entries = loop.run_until_complete(
+        slp_client.findsrvs(service_type="service:lxd_host")
+    )
+    for url in url_entries:
+        attr_list = loop.run_until_complete(
+            slp_client.findattrs(url=url)
+        )
+        if lxd_name in ast.literal_eval(attr_list)['containers']:
+            return url
+    return None
 
 def must_be_created_and_running(method):
     @wraps(method)
@@ -47,8 +69,12 @@ class Container:
     def __init__(self, project_name, homedir, client, **options):
         self.project_name = project_name
         self.homedir = homedir
-        self.client = client
         self.options = options
+        self.lxd_host = os.path.basename(get_container_host(self.lxd_name)).split(':')[0]
+        try:
+            self.client = get_client([get_container_host(self.lxd_name)])
+        except:
+            self.client = client
 
     #####################
     # CONTAINER ACTIONS #
@@ -121,9 +147,9 @@ class Container:
             # This part is the result of quite a bit of `su` args trial-and-error.
             shellhome = shellcfg.get('home') if not username else None
             homearg = '--env HOME={}'.format(shellhome) if shellhome else ''
-            cmd = 'lxc exec {} {} -- su -m {}'.format(self.lxd_name, homearg, shelluser)
+            cmd = 'lxc exec {}:{} {} -- su -m {}'.format(self.lxd_host,self.lxd_name, homearg, shelluser)
         else:
-            cmd = 'lxc exec {} -- su -m root'.format(self.lxd_name)
+            cmd = 'lxc exec {}:{} -- su -m root'.format(self.lxd_host,self.lxd_name)
 
         if cmd_args:
             # Again, a bit of trial-and-error.
@@ -246,6 +272,11 @@ class Container:
                 constants.CONTAINER_STOPPED: 'stopped',
             }.get(container.status_code, default_status)
         return status
+    
+    @property
+    def get_lxd_host(self):
+        """ Returns a string identifier representing the current host of the container. """
+        return get_container_host(self.lxd_name)
 
     ##################################
     # PRIVATE METHODS AND PROPERTIES #

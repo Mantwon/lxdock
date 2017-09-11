@@ -1,4 +1,5 @@
 import logging
+from prettytable import PrettyTable
 
 from . import constants
 from .container import Container
@@ -96,13 +97,13 @@ class Project:
 
     def status(self, container_names=None):
         """ Shows the statuses of the containers of the project. """
+        t = PrettyTable(['Container', 'Status', 'Host'])
         containers = [self.get_container_by_name(name) for name in container_names] \
             if container_names else self.containers
         max_name_length = max(len(c.name) for c in containers)
-        logger.info('Current container states:')
         for container in containers:
-            logger.info('{container_name} ({status})'.format(
-                container_name=container.name.ljust(max_name_length + 10), status=container.status))
+            t.add_row([container.name.ljust(max_name_length + 10),container.status,container.lxd_host])
+        print(t)
 
     def up(self, container_names=None, provisioning_mode=None):
         """ Creates, starts and provisions the containers of the project. """
