@@ -12,4 +12,4 @@ outputs:
 - name: build
 
 run:
-  path: ls
+  path: lxdock/run_tests.sh
